@@ -28,7 +28,7 @@
 #include <array>
 #include <span>
 
-// Enable support for std::ostream OutputIterators (default=disabled).
+// Enable support for std::ostream Output (default=disabled).
 #ifndef  SAFMAT_OUT_OSTREAM
 # define SAFMAT_OUT_OSTREAM 0
 #endif
@@ -36,7 +36,7 @@
 # include <ostream>
 #endif
 
-// Enable support for std::FILE* OutputIterators (default=enabled).
+// Enable support for std::FILE* Output (default=enabled).
 #ifndef  SAFMAT_OUT_FILE
 # define SAFMAT_OUT_FILE 1
 #endif
@@ -59,39 +59,56 @@ namespace safmat {
 }
 
 namespace safmat::io {
-    struct OutputIteratorBase {
-        virtual ~OutputIteratorBase() = default;
-        virtual void write(std::string_view) const = 0;
-    };
+    template<class T>
+    struct OutputAdapter;
 
     template<class T>
-    struct OutputIteratorImpl;
+    concept OutputConcept = requires (T *out, std::string_view s) {
+        OutputAdapter<T>::write(out, s);
+    };
+
+    class Output {
+    private:
+        struct OutputBase {
+            virtual ~OutputBase() = default;
+            virtual void write(std::string_view s) const = 0;
+        };
+        template<OutputConcept T>
+        struct OutputImpl : OutputBase {
+            T *out;
+
+            OutputImpl(T *out) : out(out) {}
+
+            void write(std::string_view s) const override {
+                OutputAdapter<T>::write(out, s);
+            }
+        };
+        std::shared_ptr<const OutputBase> ptr;
+    public:
+        Output(const Output &) = default;
+        Output(Output &&) = default;
+        template<OutputConcept T>
+        Output(T *out) : ptr(std::make_unique<const OutputImpl<T>>(out)) {}
+        template<OutputConcept T>
+        Output(T &out) : ptr(std::make_unique<const OutputImpl<T>>(&out)) {}
+
+        Output &operator=(const Output &) = default;
+        Output &operator=(Output &&) = default;
+
+        void write(std::string_view s) const { ptr->write(s); }
+        void write(char ch) const { ptr->write({ &ch, &ch + 1 }); }
+    };
 }
 
 namespace safmat {
-    class OutputIterator {
-    private:
-        std::unique_ptr<const io::OutputIteratorBase> ptr;
-    public:
-        template<class T>
-        OutputIterator(T &object)
-            : ptr(std::make_unique<io::OutputIteratorImpl<T>>(object)) {}
-
-        void write(std::string_view s) {
-            ptr->write(s);
-        }
-        void write(char ch) {
-            ptr->write(std::string_view{&ch, &ch + 1});
-        }
-    };
-
+    using io::Output;
     using InputIterator = decltype(std::string_view{}.begin());
 
     template<class T>
     concept Formattable = requires (const std::remove_cvref_t<T> &x,
                                     Formatter<std::remove_cvref_t<T>> &fmt,
                                     InputIterator &in,
-                                    OutputIterator &out) {
+                                    Output out) {
         fmt.parse(in);
         fmt.format_to(out, x);
     };
@@ -101,7 +118,7 @@ namespace safmat {
         struct FormatArgBase {
             virtual ~FormatArgBase() = default;
             virtual void parse(InputIterator &) = 0;
-            virtual void format_to(OutputIterator &) = 0;
+            virtual void format_to(Output) = 0;
             virtual void reset_fmt() = 0;
         };
         template<Formattable T>
@@ -112,7 +129,7 @@ namespace safmat {
             FormatArgImpl(T value) : value(std::move(value)) {}
 
             void parse(InputIterator &in) override { fmt.parse(in); }
-            void format_to(OutputIterator &out) override { fmt.format_to(out, value); }
+            void format_to(Output out) override { fmt.format_to(out, value); }
             void reset_fmt() override { fmt = Formatter<T>{}; }
         };
 
@@ -130,11 +147,11 @@ namespace safmat {
         }
 
         void parse(InputIterator &in) const { ptr->parse(in); }
-        void format_to(OutputIterator &out) const { ptr->format_to(out); }
+        void format_to(Output out) const { ptr->format_to(out); }
         void reset_fmt() const { ptr->reset_fmt(); }
      };
 
-     inline void vformat_to(OutputIterator &out, std::string_view fmt, std::span<FormatArg> args) {
+     inline void vformat_to(Output out, std::string_view fmt, std::span<FormatArg> args) {
         std::size_t carg{0};
         auto it = begin(fmt);
 
@@ -190,7 +207,7 @@ namespace safmat {
     }
 
     template<class... Args>
-    void format_to(OutputIterator &out, std::string_view fmt, Args&&... args) {
+    void format_to(Output &out, std::string_view fmt, Args&&... args) {
         std::array<FormatArg, sizeof...(args)> argv{ FormatArg{ std::forward<Args>(args) }... };
         vformat_to(out, fmt, argv);
     }
@@ -198,13 +215,13 @@ namespace safmat {
     template<class... Args>
     std::string format(std::string_view fmt, Args&&... args) {
         std::string str{};
-        OutputIterator out{str};
+        Output out{str};
         format_to(out, fmt, std::forward<Args>(args)...);
         return str;
     }
 
     template<class... Args>
-    void print(OutputIterator out, std::string_view fmt, Args&&... args) {
+    void print(Output out, std::string_view fmt, Args&&... args) {
         format_to(out, fmt, std::forward<Args>(args)...);
     }
 
@@ -214,7 +231,7 @@ namespace safmat {
     }
 
     template<class... Args>
-    void println(OutputIterator out, std::string_view fmt, Args&&... args) {
+    void println(Output out, std::string_view fmt, Args&&... args) {
         format_to(out, fmt, std::forward<Args>(args)...);
         out.write('\n');
     }
@@ -225,41 +242,29 @@ namespace safmat {
     }
 }
 
-// OutputIteratorImpl<T> specializations.
+// OutputAdapter<T> specializations.
 namespace safmat::io {
     template<>
-    struct OutputIteratorImpl<std::string> : OutputIteratorBase {
-        std::string &str;
-
-        OutputIteratorImpl(std::string &s) : str(s) {}
-
-        void write(std::string_view s) const override {
-            str += s;
+    struct OutputAdapter<std::string> {
+        inline static void write(std::string *out, std::string_view s) {
+            *out += s;
         }
     };
 
 #if SAFMAT_OUT_OSTREAM
     template<>
-    struct OutputIteratorImpl<std::ostream> : OutputIteratorBase {
-        std::ostream &stream;
-
-        OutputIteratorImpl(std::ostream &s) : stream(s) {}
-
-        void write(std::string_view s) const override {
-            stream << s;
+    struct OutputAdapter<std::ostream> {
+        inline static void write(std::ostream *out, std::string_view s) {
+            *out << s;
         }
     };
 #endif // SAFMAT_OUT_OSTREAM
 
 #if SAFMAT_OUT_FILE
     template<>
-    struct OutputIteratorImpl<std::FILE *> : OutputIteratorBase {
-        std::FILE *file;
-
-        OutputIteratorImpl(std::FILE *f) : file(f) {}
-
-        void write(std::string_view s) const override {
-            std::fwrite(s.data(), 1, s.size(), file);
+    struct OutputAdapter<FILE> {
+        inline static void write(FILE *out, std::string_view s) {
+            std::fwrite(s.data(), 1, s.size(), out);
         }
     };
 #endif // SAFMAT_OUT_FILE
@@ -326,7 +331,7 @@ namespace safmat {
             }
         }
 
-        void format_to(OutputIterator &out, T x) {
+        void format_to(Output out, T x) {
             std::to_chars_result result;
             char prefix[3]{};
             char buffer[sizeof (T) * 8 + 2];
@@ -391,7 +396,7 @@ namespace safmat {
     struct Formatter<bool> : Formatter<unsigned> {
         using F = Formatter<unsigned>;
         Formatter() : Formatter<unsigned>('s') {}
-        void format_to(OutputIterator &out, bool x) {
+        void format_to(Output out, bool x) {
             if (rep == 's') {
                 out.write(x ? "true" : "false");
             } else {
@@ -409,7 +414,7 @@ namespace safmat {
     template<concepts::StringLike T>
     struct Formatter<T> {
         void parse(InputIterator &) {}
-        void format_to(OutputIterator &out, const T &x) {
+        void format_to(Output out, const T &x) {
             out.write(x);
         }
     };
@@ -419,7 +424,7 @@ namespace safmat {
         using T = concepts::elem_type_t<C>;
         using F = Formatter<T>;
 
-        void format_to(OutputIterator &out, const C &c) {
+        void format_to(Output out, const C &c) {
             out.write('[');
             auto it = begin(c);
             const auto e = end(c);

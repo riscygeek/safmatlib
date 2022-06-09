@@ -49,7 +49,7 @@ struct safmat::Formatter<Person> {
         }
     }
     
-    void format_to(safmat::OutputIterator &out, const Person &p) {
+    void format_to(safmat::Output out, const Person &p) {
         switch (rep) {
         case 's':
             safmat::format_to("{}", p.name);
@@ -73,15 +73,15 @@ For more examples look into [test.cpp](test.cpp).
 
 ## TODO
 - [ ] Implement more Formatter<> specializations.
-    - [ ] std::floating_point
-    - [ ] std::chrono::*
+    - [ ] std::floating\_point
+    - [ ] std::chrono::\*
     - [ ] std::pair
     - [ ] std::tuple (maybe?)
-    - [ ] T*
+    - [ ] T\*
 - [ ] Implement more [standard format specifiers](https://en.cppreference.com/w/cpp/utility/format/formatter#Standard_format_specification) and do it properly
-- [ ] Replace OutputIterator with something different.
-- [ ] Somehow make the library char-independent without templating vformat_to().
+- [x] Replace OutputIterator with something different.
+- [ ] Somehow make the library char-independent without templating vformat\_to().
 - [ ] vformat()
 - [ ] vprint(), vprintln()
 - [ ] (maybe) implement locale-specific stuff (probably not)
-- [ ] Make the library constexpr (requires C++23's constexpr unique_ptr)
+- [ ] Make the library constexpr (requires C++23's constexpr unique\_ptr)
