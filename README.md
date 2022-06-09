@@ -9,8 +9,8 @@ Then you should be able to `#include "safmat.hpp"` the file and use it.
 
 ## HowTo Enable/Disable features.
 Just `#define` the following to 0 or 1, before `#include`ing the file.
-- SAFMAT\_OUT\_OSTREAM (std::ostream& OutputIterator)
-- SAFMAT\_OUT\_FILE (FILE* OutputIterator)
+- `SAFMAT_OUT_OSTREAM` (`std::ostream&` OutputIterator)
+- `SAFMAT_OUT_FILE` (`FILE*` OutputIterator)
 
 ## Examples
 
