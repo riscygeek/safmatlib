@@ -1,6 +1,7 @@
 # Standalone Text Formatting Library
-This is a simple library for text formatting.
+This is a simple library for text formatting in C++.
 It is inspired by (but not compatible to) [std::format](https://en.cppreference.com/w/cpp/utility/format/format) and [{fmt}](https://fmt.dev).
+Please make sure that your compiler supports at least C++20. That's GCC 10 or Clang 13.
 
 ## How to use this library in your program.
 Just copy the [`safmat.hpp`](safmat.hpp) file into your projects include directory.
