@@ -3,7 +3,7 @@ This is a simple library for text formatting.
 It is inspired by (but not compatible to) [std::format](https://en.cppreference.com/w/cpp/utility/format/format) and [{fmt}](https://fmt.dev).
 
 ## How to use this library in your program.
-Just copy the `safmat.hpp` file into your projects include directory.
+Just copy the [`safmat.hpp`](safmat.hpp) file into your projects include directory.
 Alternatively you can install it into `/usr/local/include`.
 Then you should be able to `#include "safmat.hpp"` the file and use it.
 
