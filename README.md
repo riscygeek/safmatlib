@@ -83,3 +83,4 @@ For more examples look into [test.cpp](test.cpp).
 - [ ] vformat()
 - [ ] vprint(), vprintln()
 - [ ] (maybe) implement locale-specific stuff (probably not)
+- [ ] Make the library constexpr (requires C++23's constexpr unique_ptr)

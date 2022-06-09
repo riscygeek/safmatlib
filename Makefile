@@ -9,7 +9,7 @@ test: test.cpp safmat.hpp
 	$(CXX) -o $@ $< $(CXXFLAGS)
 
 install: test
-	#install -vDm644 safmat.hpp $(DESTDIR)$(prefix)/include/safmat.hpp
+	install -vDm644 safmat.hpp $(DESTDIR)$(prefix)/include/safmat.hpp
 
 run: test
 	./test
