@@ -272,6 +272,7 @@ namespace safmat::io {
 #endif // SAFMAT_OUT_FILE
 }
 
+// Concepts used by Formatter<>'s.
 namespace safmat::concepts {
     template<class T>
     concept StringLike = requires (T x) {
@@ -288,183 +289,183 @@ namespace safmat::concepts {
     using elem_type_t = std::remove_cvref_t<decltype(*begin(*(C *)0))>;
 }
 
-// Formatter<T> specializations.
-namespace safmat {
-    namespace internal {
-        inline void parse_prec(InputIterator &in, std::size_t &prec) {
-            if (*in == '.') {
-                ++in;
-                if (!std::isdigit(*in))
-                    throw format_error{"Expected number after '.'."};
+// Formatter<> helpers.
+namespace safmat::internal {
+    inline void parse_prec(InputIterator &in, std::size_t &prec) {
+        if (*in == '.') {
+            ++in;
+            if (!std::isdigit(*in))
+                throw format_error{"Expected number after '.'."};
 
-                prec = 0;
-                while (std::isdigit(*in))
-                    prec = prec * 10 + (*in++ - '0');
+            prec = 0;
+            while (std::isdigit(*in))
+                prec = prec * 10 + (*in++ - '0');
+        }
+    }
+
+    struct PaddedFormatter {
+        char fill{'>'};
+        char padding{'\0'};
+        std::size_t width{0};
+
+        void parse_fill(InputIterator &in) {
+            auto is_fill = [](char ch) {
+                return ch == '<' || ch == '>' || ch == '^';
+            };
+            if (is_fill(*in)) {
+                padding = ' ';
+                fill = *in++;
+            } else if (*in && is_fill(in[1])) {
+                padding = *in++;
+                fill = *in++;
+            }
+        }
+        void parse_width(InputIterator &in) {
+            // Parse width.
+            width = 0;
+            while (std::isdigit(*in)) {
+                width = width * 10 + (*in++ - '0');
             }
         }
 
-        struct PaddedFormatter {
-            char fill{'>'};
-            char padding{'\0'};
-            std::size_t width{0};
+        void print_padding(Output out, std::size_t len, std::size_t add) {
+            const std::string pad(fill == '^' ? (len + add) / 2 : len, padding);
+            out.write(pad);
+        }
 
-            void parse_fill(InputIterator &in) {
-                auto is_fill = [](char ch) {
-                    return ch == '<' || ch == '>' || ch == '^';
-                };
-                if (is_fill(*in)) {
-                    padding = ' ';
-                    fill = *in++;
-                } else if (*in && is_fill(in[1])) {
-                    padding = *in++;
-                    fill = *in++;
-                }
+        void pre_format(Output out, std::size_t len) {
+            if (len < width && (fill == '>' || fill == '^')) {
+                print_padding(out, width - len, 0);
             }
-            void parse_width(InputIterator &in) {
-                // Parse width.
-                width = 0;
-                while (std::isdigit(*in)) {
-                    width = width * 10 + (*in++ - '0');
-                }
+        }
+        void post_format(Output out, std::size_t len) {
+            if (len < width && (fill == '<' || fill == '^')) {
+                print_padding(out, width - len, 1);
             }
+        }
+    };
 
-            void print_padding(Output out, std::size_t len, std::size_t add) {
-                const std::string pad(fill == '^' ? (len + add) / 2 : len, padding);
-                out.write(pad);
-            }
+    struct NumericFormatter : PaddedFormatter {
+        char sign{'-'};
+        char alternate{false};
+        char pad_zero{false};
 
-            void pre_format(Output out, std::size_t len) {
-                if (len < width && (fill == '>' || fill == '^')) {
-                    print_padding(out, width - len, 0);
-                }
-            }
-            void post_format(Output out, std::size_t len) {
-                if (len < width && (fill == '<' || fill == '^')) {
-                    print_padding(out, width - len, 1);
-                }
-            }
-        };
+        void parse(InputIterator &in) {
+            PaddedFormatter::parse_fill(in);
 
-        struct NumericFormatter : PaddedFormatter {
-            char sign{'-'};
-            char alternate{false};
-            char pad_zero{false};
-
-            void parse(InputIterator &in) {
-                PaddedFormatter::parse_fill(in);
-
-                // Parse sign.
-                if (*in == '+' || *in == '-' || *in == ' ') {
-                    sign = *in++;
-                }
-
-                // Parse alternate form.
-                if (*in == '#') {
-                    alternate = true;
-                    ++in;
-                }
-
-                // Parse '0'.
-                if (*in == '0') {
-                    pad_zero = padding == '\0';
-                    ++in;
-                }
-
-                PaddedFormatter::parse_width(in);
+            // Parse sign.
+            if (*in == '+' || *in == '-' || *in == ' ') {
+                sign = *in++;
             }
 
-            void format(Output out, std::string_view number, bool negative) {
-                const std::string_view sign_str = negative ? "-" : (sign != '-' ? std::string_view{&sign, &sign + 1} : "");
-                if (pad_zero) {
-                    out.write(sign_str);
-
-                    if (const auto len = number.size(); len < width) {
-                        const std::string pad(width - len, '0');
-                        out.write(pad);
-                    }
-
-                    out.write(number);
-                } else {
-                    const auto len = sign_str.size() + number.size();
-
-                    PaddedFormatter::pre_format(out, len);
-                    out.write(sign_str);
-                    out.write(number);
-                    PaddedFormatter::post_format(out, len);
-                }
+            // Parse alternate form.
+            if (*in == '#') {
+                alternate = true;
+                ++in;
             }
 
-        };
+            // Parse '0'.
+            if (*in == '0') {
+                pad_zero = padding == '\0';
+                ++in;
+            }
 
-        struct IntegralFormatter : NumericFormatter {
-            char rep;
+            PaddedFormatter::parse_width(in);
+        }
 
-            IntegralFormatter(char rep) : rep{rep} {}
+        void format(Output out, std::string_view number, bool negative) {
+            const std::string_view sign_str = negative ? "-" : (sign != '-' ? std::string_view{&sign, &sign + 1} : "");
+            if (pad_zero) {
+                out.write(sign_str);
 
-            void parse(InputIterator &in, bool is_bool) {
-                NumericFormatter::parse(in);
+                if (const auto len = number.size(); len < width) {
+                    const std::string pad(width - len, '0');
+                    out.write(pad);
+                }
 
-                // Parse 'L'.
-                if (*in == 'L')
-                    throw format_error{"Locale-specific formatting is not implemented/supported."};
+                out.write(number);
+            } else {
+                const auto len = sign_str.size() + number.size();
 
-                // Parse rep.
-                switch (*in) {
-                case 'b':
-                case 'B':
-                case 'c':
-                case 'd':
-                case 'o':
-                case 'x':
-                case 'X':
+                PaddedFormatter::pre_format(out, len);
+                out.write(sign_str);
+                out.write(number);
+                PaddedFormatter::post_format(out, len);
+            }
+        }
+
+    };
+
+    struct IntegralFormatter : NumericFormatter {
+        char rep;
+
+        IntegralFormatter(char rep) : rep{rep} {}
+
+        void parse(InputIterator &in, bool is_bool) {
+            NumericFormatter::parse(in);
+
+            // Parse 'L'.
+            if (*in == 'L')
+                throw format_error{"Locale-specific formatting is not implemented/supported."};
+
+            // Parse rep.
+            switch (*in) {
+            case 'b':
+            case 'B':
+            case 'c':
+            case 'd':
+            case 'o':
+            case 'x':
+            case 'X':
+                rep = *in++;
+                break;
+            case 's':
+                if (is_bool) {
                     rep = *in++;
                     break;
-                case 's':
-                    if (is_bool) {
-                        rep = *in++;
-                        break;
-                    }
-                    // fallthrough
-                case '}':
-                    return;
-                default:
-                    throw format_error("Expected '}'.");
                 }
+                // fallthrough
+            case '}':
+                return;
+            default:
+                throw format_error("Expected '}'.");
             }
-            void format(Output out, std::function<std::string(int)> f, bool negative) {
-                std::string number{};
+        }
+        void format(Output out, std::function<std::string(int)> f, bool negative) {
+            std::string number{};
 
-                switch (rep) {
-                case 'b':
-                case 'B':
-                case 'x':
-                case 'X':
-                    if (alternate) {
-                        number += '0';
-                        number += rep;
-                    }
-                    number += f(std::tolower(rep) == 'b' ? 2 : 16);
-                    break;
-                case 'c':
-                case 'd':
-                case '\0':
-                    number = f(rep == 'c' ? 0 : 10);
-                    break;
-                case 'o':
-                    if (alternate)
-                        number += '0';
-                    number += f(8);
-                    break;
-                default:
-                    throw format_error{"Unimplemented operation."};
+            switch (rep) {
+            case 'b':
+            case 'B':
+            case 'x':
+            case 'X':
+                if (alternate) {
+                    number += '0';
+                    number += rep;
                 }
-
-                NumericFormatter::format(out, number, negative);
+                number += f(std::tolower(rep) == 'b' ? 2 : 16);
+                break;
+            case 'c':
+            case 'd':
+            case '\0':
+                number = f(rep == 'c' ? 0 : 10);
+                break;
+            case 'o':
+                if (alternate)
+                    number += '0';
+                number += f(8);
+                break;
+            default:
+                throw format_error{"Unimplemented operation."};
             }
-        };
 
-    }
+            NumericFormatter::format(out, number, negative);
+        }
+    };
+}
 
+// Formatter<T> specializations.
+namespace safmat {
     template<std::integral T>
     struct Formatter<T> : internal::IntegralFormatter {
         Formatter(char rep = 'd') : IntegralFormatter{rep} {}
