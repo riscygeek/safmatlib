@@ -291,21 +291,6 @@ namespace safmat::concepts {
 // Formatter<T> specializations.
 namespace safmat {
     namespace internal {
-        inline void parse_signh0(InputIterator &in, char &sign, bool &show_prefix, char &padding, bool &pad_zero) {
-            if (*in == '+' || *in == '-' || *in == ' ') {
-                sign = *in++;
-            }
-
-            if (*in == '#') {
-                show_prefix = true;
-                ++in;
-            }
-
-            if (*in == '0') {
-                pad_zero = padding == '\0';
-                ++in;
-            }
-        }
         inline void parse_prec(InputIterator &in, std::size_t &prec) {
             if (*in == '.') {
                 ++in;
@@ -360,18 +345,64 @@ namespace safmat {
             }
         };
 
-        struct IntegralFormatter : PaddedFormatter {
+        struct NumericFormatter : PaddedFormatter {
             char sign{'-'};
+            char alternate{false};
+            char pad_zero{false};
+
+            void parse(InputIterator &in) {
+                PaddedFormatter::parse_fill(in);
+
+                // Parse sign.
+                if (*in == '+' || *in == '-' || *in == ' ') {
+                    sign = *in++;
+                }
+
+                // Parse alternate form.
+                if (*in == '#') {
+                    alternate = true;
+                    ++in;
+                }
+
+                // Parse '0'.
+                if (*in == '0') {
+                    pad_zero = padding == '\0';
+                    ++in;
+                }
+
+                PaddedFormatter::parse_width(in);
+            }
+
+            void format(Output out, std::string_view number, bool negative) {
+                const std::string_view sign_str = negative ? "-" : (sign != '-' ? std::string_view{&sign, &sign + 1} : "");
+                if (pad_zero) {
+                    out.write(sign_str);
+
+                    if (const auto len = number.size(); len < width) {
+                        const std::string pad(width - len, '0');
+                        out.write(pad);
+                    }
+
+                    out.write(number);
+                } else {
+                    const auto len = sign_str.size() + number.size();
+
+                    PaddedFormatter::pre_format(out, len);
+                    out.write(sign_str);
+                    out.write(number);
+                    PaddedFormatter::post_format(out, len);
+                }
+            }
+
+        };
+
+        struct IntegralFormatter : NumericFormatter {
             char rep;
-            bool show_prefix{false};
-            bool pad_zero{false};
 
             IntegralFormatter(char rep) : rep{rep} {}
 
             void parse(InputIterator &in, bool is_bool) {
-                PaddedFormatter::parse_fill(in);
-                parse_signh0(in, sign, show_prefix, padding, pad_zero);
-                PaddedFormatter::parse_width(in);
+                NumericFormatter::parse(in);
 
                 // Parse 'L'.
                 if (*in == 'L')
@@ -401,61 +432,34 @@ namespace safmat {
                 }
             }
             void format(Output out, std::function<std::string(int)> f, bool negative) {
-                char prefix[3]{};
-                std::string number;
+                std::string number{};
 
                 switch (rep) {
                 case 'b':
                 case 'B':
-                    prefix[0] = '0';
-                    prefix[1] = rep;
-                    number = f(2);
-                    break;
-                case 'c':
-                    number = f(0);
-                    break;
-                case 'd':
-                case '\0':
-                    number = f(10);
-                    break;
-                case 'o':
-                    prefix[0] = '0';
-                    number = f(8);
-                    break;
                 case 'x':
                 case 'X':
-                    prefix[0] = '0';
-                    prefix[1] = rep;
-                    number = f(16);
+                    if (alternate) {
+                        number += '0';
+                        number += rep;
+                    }
+                    number += f(std::tolower(rep) == 'b' ? 2 : 16);
+                    break;
+                case 'c':
+                case 'd':
+                case '\0':
+                    number = f(rep == 'c' ? 0 : 10);
+                    break;
+                case 'o':
+                    if (alternate)
+                        number += '0';
+                    number += f(8);
                     break;
                 default:
                     throw format_error{"Unimplemented operation."};
                 }
 
-                if (!show_prefix)
-                    prefix[0] = '\0';
-
-                const std::string_view sign_str = negative && rep != 'c' ? "-" : (sign != '-' && rep != 'c' ? std::string_view{&sign, &sign + 1} : "");
-
-                if (pad_zero) {
-                    out.write(sign_str);
-                    out.write(prefix);
-
-                    if (const auto len = number.size(); len < width) {
-                        const std::string pad(width - len, '0');
-                        out.write(pad);
-                    }
-
-                    out.write(number);
-                } else {
-                    const auto len = sign_str.size() + std::strlen(prefix) + number.size();
-
-                    PaddedFormatter::pre_format(out, len);
-                    out.write(sign_str);
-                    out.write(prefix);
-                    out.write(number);
-                    PaddedFormatter::post_format(out, len);
-                }
+                NumericFormatter::format(out, number, negative);
             }
         };
 
