@@ -34,6 +34,8 @@ int main() {
 
     println("'{:^11.5}'", "Hello World");
 
+    println("{}", std::pair{42, "Hello"});
+
     RandomStruct r{ 42, "Hello World", { 1, 2, 5, 4, 96, 69, -420, 22 } };
     println(std::cout, "r = {}", r);
 }

@@ -311,7 +311,7 @@ namespace safmat::internal {
         char padding{'\0'};
         std::size_t width{0};
 
-        PaddedFormatter(char fill) : fill{fill} {}
+        PaddedFormatter(char fill = '<') : fill{fill} {}
 
         void parse_fill(InputIterator &in) {
             auto is_fill = [](char ch) {
@@ -331,6 +331,10 @@ namespace safmat::internal {
             while (std::isdigit(*in)) {
                 width = width * 10 + (*in++ - '0');
             }
+        }
+        void parse(InputIterator &in) {
+            parse_fill(in);
+            parse_width(in);
         }
 
         void print_padding(Output out, std::size_t len, std::size_t add) {
@@ -557,10 +561,8 @@ namespace safmat::internal {
     };
 
     struct StringFormatter : PaddedFormatter, PrecisionFormatter {
-        StringFormatter() : internal::PaddedFormatter{'<'} {}
         void parse(InputIterator &in) {
-            PaddedFormatter::parse_fill(in);
-            PaddedFormatter::parse_width(in);
+            PaddedFormatter::parse(in);
             PrecisionFormatter::parse_prec(in);
 
             if (*in == 's')
@@ -662,6 +664,17 @@ namespace safmat {
 
     template<concepts::StringLike T>
     struct Formatter<T> : internal::StringFormatter {};
+
+    template<Formattable A, Formattable B>
+    struct Formatter<std::pair<A, B>> : internal::PaddedFormatter {
+        using T = std::pair<A, B>;
+
+        void format_to(Output out, const T &p) {
+            const auto &[a, b] = p;
+
+            safmat::format_to(out, "({}, {})", a, b);
+        }
+    };
 
     template<concepts::FormattableContainer C>
     struct Formatter<C> : Formatter<concepts::elem_type_t<C>> {
