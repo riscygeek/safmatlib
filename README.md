@@ -52,10 +52,10 @@ struct safmat::Formatter<Person> {
     void format_to(safmat::Output out, const Person &p) {
         switch (rep) {
         case 's':
-            safmat::format_to("{}", p.name);
+            safmat::format_to(out, "{}", p.name);
             break;
         case 'x':
-            safmat::format_to("Person{{ name=\"{}\", age={} }}", p.name, p.age);
+            safmat::format_to(out, "Person{{ name=\"{}\", age={} }}", p.name, p.age);
             break;
         default:
             throw safmat::format_error{"Unimplemented format specifier."};

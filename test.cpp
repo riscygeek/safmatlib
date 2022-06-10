@@ -21,7 +21,9 @@ struct safmat::Formatter<RandomStruct> {
 int main() {
     using namespace std::literals;
     using namespace safmat;
-    print("Hello {}!\n", 42);
+
+
+    println("'{:X^#8x}'", -42);
     println("Hello {} {2} {1}!", "World", "String"s, "StringView"sv);
 
     auto vec = std::vector{10, 20, 30};

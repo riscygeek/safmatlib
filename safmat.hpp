@@ -18,10 +18,12 @@
 #define FILE_SAFMAT_HPP
 #include <string_view>
 #include <type_traits>
+#include <functional>
 #include <exception>
 #include <concepts>
 #include <charconv>
 #include <utility>
+#include <cstring>
 #include <string>
 #include <memory>
 #include <cctype>
@@ -288,21 +290,10 @@ namespace safmat::concepts {
 
 // Formatter<T> specializations.
 namespace safmat {
-    template<std::integral T>
-    struct Formatter<T> {
-        char rep;
-        char sign{'-'};
-        bool show_prefix{false};
-
-        Formatter(char rep = 'd') : rep(rep) {}
-
-        void parse(InputIterator &in) {
-            switch (*in) {
-            case '+':
-            case '-':
-            case ' ':
+    namespace internal {
+        inline void parse_signh0(InputIterator &in, char &sign, bool &show_prefix, char &padding, bool &pad_zero) {
+            if (*in == '+' || *in == '-' || *in == ' ') {
                 sign = *in++;
-                break;
             }
 
             if (*in == '#') {
@@ -310,31 +301,175 @@ namespace safmat {
                 ++in;
             }
 
-            switch (*in) {
-            case 'b':
-            case 'B':
-            case 'c':
-            case 'd':
-            case 'o':
-            case 'x':
-            case 'X':
-                rep = *in++;
-                break;
-            if constexpr (std::is_same_v<bool, T>) {
-            case 's':
-                rep = *in++;
+            if (*in == '0') {
+                pad_zero = padding == '\0';
+                ++in;
             }
-            case '}':
-                return;
-            default:
-                throw format_error("Expected '}'.");
+        }
+        inline void parse_prec(InputIterator &in, std::size_t &prec) {
+            if (*in == '.') {
+                ++in;
+                if (!std::isdigit(*in))
+                    throw format_error{"Expected number after '.'."};
+
+                prec = 0;
+                while (std::isdigit(*in))
+                    prec = prec * 10 + (*in++ - '0');
             }
         }
 
+        struct PaddedFormatter {
+            char fill{'>'};
+            char padding{'\0'};
+            std::size_t width{0};
+
+            void parse_fill(InputIterator &in) {
+                auto is_fill = [](char ch) {
+                    return ch == '<' || ch == '>' || ch == '^';
+                };
+                if (is_fill(*in)) {
+                    padding = ' ';
+                    fill = *in++;
+                } else if (*in && is_fill(in[1])) {
+                    padding = *in++;
+                    fill = *in++;
+                }
+            }
+            void parse_width(InputIterator &in) {
+                // Parse width.
+                width = 0;
+                while (std::isdigit(*in)) {
+                    width = width * 10 + (*in++ - '0');
+                }
+            }
+
+            void print_padding(Output out, std::size_t len, std::size_t add) {
+                const std::string pad(fill == '^' ? (len + add) / 2 : len, padding);
+                out.write(pad);
+            }
+
+            void pre_format(Output out, std::size_t len) {
+                if (len < width && (fill == '>' || fill == '^')) {
+                    print_padding(out, width - len, 0);
+                }
+            }
+            void post_format(Output out, std::size_t len) {
+                if (len < width && (fill == '<' || fill == '^')) {
+                    print_padding(out, width - len, 1);
+                }
+            }
+        };
+
+        struct IntegralFormatter : PaddedFormatter {
+            char sign{'-'};
+            char rep;
+            bool show_prefix{false};
+            bool pad_zero{false};
+
+            IntegralFormatter(char rep) : rep{rep} {}
+
+            void parse(InputIterator &in, bool is_bool) {
+                PaddedFormatter::parse_fill(in);
+                parse_signh0(in, sign, show_prefix, padding, pad_zero);
+                PaddedFormatter::parse_width(in);
+
+                // Parse 'L'.
+                if (*in == 'L')
+                    throw format_error{"Locale-specific formatting is not implemented/supported."};
+
+                // Parse rep.
+                switch (*in) {
+                case 'b':
+                case 'B':
+                case 'c':
+                case 'd':
+                case 'o':
+                case 'x':
+                case 'X':
+                    rep = *in++;
+                    break;
+                case 's':
+                    if (is_bool) {
+                        rep = *in++;
+                        break;
+                    }
+                    // fallthrough
+                case '}':
+                    return;
+                default:
+                    throw format_error("Expected '}'.");
+                }
+            }
+            void format(Output out, std::function<std::string(int)> f, bool negative) {
+                char prefix[3]{};
+                std::string number;
+
+                switch (rep) {
+                case 'b':
+                case 'B':
+                    prefix[0] = '0';
+                    prefix[1] = rep;
+                    number = f(2);
+                    break;
+                case 'c':
+                    number = f(0);
+                    break;
+                case 'd':
+                case '\0':
+                    number = f(10);
+                    break;
+                case 'o':
+                    prefix[0] = '0';
+                    number = f(8);
+                    break;
+                case 'x':
+                case 'X':
+                    prefix[0] = '0';
+                    prefix[1] = rep;
+                    number = f(16);
+                    break;
+                default:
+                    throw format_error{"Unimplemented operation."};
+                }
+
+                if (!show_prefix)
+                    prefix[0] = '\0';
+
+                const std::string_view sign_str = negative && rep != 'c' ? "-" : (sign != '-' && rep != 'c' ? std::string_view{&sign, &sign + 1} : "");
+
+                if (pad_zero) {
+                    out.write(sign_str);
+                    out.write(prefix);
+
+                    if (const auto len = number.size(); len < width) {
+                        const std::string pad(width - len, '0');
+                        out.write(pad);
+                    }
+
+                    out.write(number);
+                } else {
+                    const auto len = sign_str.size() + std::strlen(prefix) + number.size();
+
+                    PaddedFormatter::pre_format(out, len);
+                    out.write(sign_str);
+                    out.write(prefix);
+                    out.write(number);
+                    PaddedFormatter::post_format(out, len);
+                }
+            }
+        };
+
+    }
+
+    template<std::integral T>
+    struct Formatter<T> : internal::IntegralFormatter {
+        Formatter(char rep = 'd') : IntegralFormatter{rep} {}
+
+        void parse(InputIterator &in) {
+            IntegralFormatter::parse(in, std::is_same_v<T, bool>);
+       }
+
         void format_to(Output out, T x) {
-            std::to_chars_result result;
-            char prefix[3]{};
-            char buffer[sizeof (T) * 8 + 2];
             bool is_negative;
 
             if constexpr (std::is_signed_v<T>) {
@@ -345,50 +480,21 @@ namespace safmat {
                 is_negative = false;
             }
 
-            auto to_chars = [&result, &buffer, x](int base) {
-                result = std::to_chars(buffer, buffer + sizeof buffer, x, base);
+            const auto f = [x](int base) {
+                if (base == 0) {
+                    return std::string(1, static_cast<char>(x));
+                }
+                char buffer[sizeof (T) * 8 + 2];
+                const auto result = std::to_chars(buffer, buffer + sizeof buffer, x, base);
+                if (result.ec == std::errc{}) {
+                    *result.ptr = '\0';
+                    return std::string{buffer};
+                } else {
+                    throw format_error{"Number too big."};
+                }
             };
 
-            switch (rep) {
-            case 'b':
-            case 'B':
-                prefix[0] = '0';
-                prefix[1] = rep;
-                to_chars(2);
-                break;
-            case 'c':
-                out.write(static_cast<char>(x));
-                return;
-            case 'd':
-            case '\0':
-                to_chars(10);
-                break;
-            case 'o':
-                prefix[0] = '0';
-                to_chars(8);
-                break;
-            case 'x':
-            case 'X':
-                prefix[0] = '0';
-                prefix[1] = rep;
-                to_chars(16);
-                break;
-            default:
-                throw format_error{"Unimplemented operation"};
-            }
-
-            if (result.ec == std::errc{}) {
-                if (is_negative) {
-                    out.write('-');
-                } else if (sign != '-') {
-                    out.write(sign);
-                }
-                if (show_prefix)
-                    out.write(prefix);
-                out.write(std::string_view{buffer, result.ptr});
-            } else {
-                throw format_error{"Failed to format integer."};
-            }
+            IntegralFormatter::format(out, f, is_negative);
         }
     };
 
