@@ -1,5 +1,6 @@
 #define SAFMAT_OUT_OSTREAM 1
 #include <iostream>
+#include <numbers>
 #include <vector>
 #include <set>
 #include "safmat.hpp"
@@ -24,6 +25,7 @@ int main() {
 
     println("'{:X^#8x}'", -42);
     println("Hello {} {2} {1}!", "World", "String"s, "StringView"sv);
+    println("pi = {}", std::numbers::pi);
 
     auto vec = std::vector{10, 20, 30};
     println("vec = {}", vec);

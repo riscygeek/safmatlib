@@ -73,12 +73,12 @@ For more examples look into [test.cpp](test.cpp).
 
 ## TODO
 - [ ] Implement more Formatter<> specializations.
-    - [ ] std::floating\_point
+    - [x] std::floating\_point
     - [ ] std::chrono::\*
     - [ ] std::pair
     - [ ] std::tuple (maybe?)
     - [ ] T\*
-- [ ] Implement more [standard format specifiers](https://en.cppreference.com/w/cpp/utility/format/formatter#Standard_format_specification) and do it properly
+- [x] Implement more [standard format specifiers](https://en.cppreference.com/w/cpp/utility/format/formatter#Standard_format_specification) and do it properly
 - [x] Replace OutputIterator with something different.
 - [ ] Somehow make the library char-independent without templating vformat\_to().
 - [ ] vformat()

@@ -27,7 +27,9 @@
 #include <cstring>
 #include <string>
 #include <memory>
+#include <limits>
 #include <cctype>
+#include <cmath>
 #include <array>
 #include <span>
 
@@ -446,8 +448,6 @@ namespace safmat::internal {
                     break;
                 }
                 // fallthrough
-            case '}':
-                return;
             default:
                 throw format_error("Expected '}'.");
             }
@@ -487,12 +487,81 @@ namespace safmat::internal {
         }
     };
 
+    struct FloatingPointFormatter : NumericFormatter, PrecisionFormatter {
+        char rep{'\0'};
+
+        void parse(InputIterator &in) {
+            NumericFormatter::parse(in);
+            PrecisionFormatter::parse_prec(in);
+
+            // Parse 'L'.
+            if (*in == 'L')
+                throw format_error{"Locale-specific formatting is not implemented/supported."};
+
+            // Parse rep.
+            switch (*in) {
+            case 'a':
+            case 'A':
+            case 'e':
+            case 'E':
+            case 'f':
+            case 'F':
+            case 'g':
+            case 'G':
+                rep = *in++;
+                break;
+            default:
+                throw format_error("Expected '}'.");
+            }
+        }
+
+        void format(Output out, std::function<std::string(std::optional<std::chars_format>)> f, bool negative) {
+            std::optional<std::chars_format> fmt{};
+
+            switch (rep) {
+            case 'a':
+            case 'A':
+                fmt = std::chars_format::hex;
+                break;
+            case 'e':
+            case 'E':
+                fmt = std::chars_format::scientific;
+                break;
+            case 'f':
+            case 'F':
+                fmt = std::chars_format::fixed;
+                break;
+            case 'g':
+            case 'G':
+                fmt = std::chars_format::general;
+                break;
+            case '\0':
+                if (prec.has_value())
+                    fmt = std::chars_format::general;
+                break;
+            default:
+                throw format_error{"Unimplemented operation."};
+            }
+
+            if (rep != '\0' && !prec.has_value()) {
+                prec = 6;
+            }
+
+            auto number = f(fmt);
+            if (std::isupper(rep)) {
+                //std::transform(begin(number), end(number), begin(number), [](char ch){ return std::toupper(static_cast<unsigned char>(ch)); });
+                std::for_each(begin(number), end(number), [](char &ch){ ch = std::toupper(static_cast<unsigned char>(ch)); });
+            }
+            NumericFormatter::format(out, number, negative);
+        }
+    };
+
     struct StringFormatter : PaddedFormatter, PrecisionFormatter {
         StringFormatter() : internal::PaddedFormatter{'<'} {}
         void parse(InputIterator &in) {
-            parse_fill(in);
-            parse_width(in);
-            parse_prec(in);
+            PaddedFormatter::parse_fill(in);
+            PaddedFormatter::parse_width(in);
+            PrecisionFormatter::parse_prec(in);
 
             if (*in == 's')
                 ++in;
@@ -528,18 +597,18 @@ namespace safmat {
                 is_negative = false;
             }
 
-            const auto f = [x](int base) {
+            const auto f = [x](int base) -> std::string {
                 if (base == 0) {
                     return std::string(1, static_cast<char>(x));
                 } else if (base == 1) {
-                    return std::string{x ? "true" : "false"};
+                    return x ? "true" : "false";
                 }
 
                 char buffer[sizeof (T) * 8 + 2];
                 const auto result = std::to_chars(buffer, buffer + sizeof buffer, x, base);
                 if (result.ec == std::errc{}) {
                     *result.ptr = '\0';
-                    return std::string{buffer};
+                    return buffer;
                 } else {
                     throw format_error{"Number too big."};
                 }
@@ -551,14 +620,44 @@ namespace safmat {
 
     template<>
     struct Formatter<bool> : Formatter<unsigned> {
-        using F = Formatter<unsigned>;
         Formatter() : Formatter<unsigned>('s') {}
     };
 
     template<>
     struct Formatter<char> : Formatter<int> {
-        using F = Formatter<int>;
         Formatter() : Formatter<int>('c') {}
+    };
+
+    template<std::floating_point T>
+    struct Formatter<T> : internal::FloatingPointFormatter {
+        void format_to(Output out, T x) {
+            const auto f = [this, x](std::optional<std::chars_format> fmt) -> std::string {
+                const auto v = std::abs(x);
+
+                const auto ilen = std::max(width, (v != T{}) ?  static_cast<std::size_t>(std::ceil(std::log10(v))) : 1);
+                const auto flen = prec.value_or(std::numeric_limits<T>::digits10 * 2);
+                const auto len = ilen + flen + 3;
+
+                std::unique_ptr<char []> buffer(new char[len]);
+
+                std::to_chars_result r;
+                if (!fmt.has_value()) {
+                    r = std::to_chars(buffer.get(), buffer.get() + len, v);
+                } else if (prec.has_value()) {
+                    r = std::to_chars(buffer.get(), buffer.get() + len, v, fmt.value(), prec.value());
+                } else {
+                    r = std::to_chars(buffer.get(), buffer.get() + len, v, fmt.value());
+                }
+
+                if (r.ec == std::errc{}) {
+                    *r.ptr = '\0';
+                    return buffer.get();
+                } else {
+                    throw format_error{"Number too long."};
+                }
+            };
+            format(out, f, x < T{});
+        }
     };
 
     template<concepts::StringLike T>
