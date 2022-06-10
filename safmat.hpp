@@ -20,6 +20,7 @@
 #include <type_traits>
 #include <functional>
 #include <exception>
+#include <optional>
 #include <concepts>
 #include <charconv>
 #include <utility>
@@ -304,9 +305,11 @@ namespace safmat::internal {
     }
 
     struct PaddedFormatter {
-        char fill{'>'};
+        char fill;
         char padding{'\0'};
         std::size_t width{0};
+
+        PaddedFormatter(char fill) : fill{fill} {}
 
         void parse_fill(InputIterator &in) {
             auto is_fill = [](char ch) {
@@ -345,10 +348,28 @@ namespace safmat::internal {
         }
     };
 
+    struct PrecisionFormatter {
+        std::optional<std::size_t> prec{};
+
+        void parse_prec(InputIterator &in) {
+            if (*in == '.') {
+                ++in;
+                if (!std::isdigit(*in))
+                    throw format_error{"Expected precision."};
+                std::size_t n = 0;
+                while (std::isdigit(*in))
+                    n = n * 10 + (*in++ - '0');
+                prec = n;
+            }
+        }
+    };
+
     struct NumericFormatter : PaddedFormatter {
         char sign{'-'};
         char alternate{false};
         char pad_zero{false};
+
+        NumericFormatter() : PaddedFormatter{'>'} {}
 
         void parse(InputIterator &in) {
             PaddedFormatter::parse_fill(in);
@@ -455,11 +476,33 @@ namespace safmat::internal {
                     number += '0';
                 number += f(8);
                 break;
+            case 's':
+                number = f(1);
+                break;
             default:
                 throw format_error{"Unimplemented operation."};
             }
 
             NumericFormatter::format(out, number, negative);
+        }
+    };
+
+    struct StringFormatter : PaddedFormatter, PrecisionFormatter {
+        StringFormatter() : internal::PaddedFormatter{'<'} {}
+        void parse(InputIterator &in) {
+            parse_fill(in);
+            parse_width(in);
+            parse_prec(in);
+
+            if (*in == 's')
+                ++in;
+        }
+
+        void format_to(Output out, std::string_view s) {
+            const auto len = prec.has_value() ? std::min(prec.value(), s.length()) : s.length();
+            PaddedFormatter::pre_format(out, len);
+            out.write(s.substr(0, len));
+            PaddedFormatter::post_format(out, len);
         }
     };
 }
@@ -488,7 +531,10 @@ namespace safmat {
             const auto f = [x](int base) {
                 if (base == 0) {
                     return std::string(1, static_cast<char>(x));
+                } else if (base == 1) {
+                    return std::string{x ? "true" : "false"};
                 }
+
                 char buffer[sizeof (T) * 8 + 2];
                 const auto result = std::to_chars(buffer, buffer + sizeof buffer, x, base);
                 if (result.ec == std::errc{}) {
@@ -507,13 +553,6 @@ namespace safmat {
     struct Formatter<bool> : Formatter<unsigned> {
         using F = Formatter<unsigned>;
         Formatter() : Formatter<unsigned>('s') {}
-        void format_to(Output out, bool x) {
-            if (rep == 's') {
-                out.write(x ? "true" : "false");
-            } else {
-                F::format_to(out, x);
-            }
-        }
     };
 
     template<>
@@ -523,12 +562,7 @@ namespace safmat {
     };
 
     template<concepts::StringLike T>
-    struct Formatter<T> {
-        void parse(InputIterator &) {}
-        void format_to(Output out, const T &x) {
-            out.write(x);
-        }
-    };
+    struct Formatter<T> : internal::StringFormatter {};
 
     template<concepts::FormattableContainer C>
     struct Formatter<C> : Formatter<concepts::elem_type_t<C>> {

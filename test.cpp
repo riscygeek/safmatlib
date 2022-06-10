@@ -22,14 +22,15 @@ int main() {
     using namespace std::literals;
     using namespace safmat;
 
-
     println("'{:X^#8x}'", -42);
     println("Hello {} {2} {1}!", "World", "String"s, "StringView"sv);
 
     auto vec = std::vector{10, 20, 30};
     println("vec = {}", vec);
 
-    println("{} {}", true, 'X');
+    println("{} {0:d} {}", true, 'X');
+
+    println("'{:^11.5}'", "Hello World");
 
     RandomStruct r{ 42, "Hello World", { 1, 2, 5, 4, 96, 69, -420, 22 } };
     println(std::cout, "r = {}", r);
