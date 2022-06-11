@@ -69,13 +69,31 @@ int main() {
 }
 ```
 
+### 3. Implementing your own OutputAdapter
+```
+<--snip-->
+template<>
+struct safmat::io::OutputAdapter<std::vector<char>> {
+    inline static void write(std::vector<char> *vec, std::string_view s) {
+        vec->insert(end(*vec), begin(s), end(s));
+    }
+};
+
+int main() {
+    std::vector<char> chars{};
+    safmt::print(chars, "Hello World {}", 42);
+    
+    safmat::println("{}", chars);
+}
+```
+
 For more examples look into [test.cpp](test.cpp).
 
 ## TODO
 - [ ] Implement more Formatter<> specializations.
     - [x] std::floating\_point
     - [ ] std::chrono::\*
-    - [ ] std::pair
+    - [x] std::pair
     - [ ] std::tuple (maybe?)
     - [ ] T\*
 - [x] Implement more [standard format specifiers](https://en.cppreference.com/w/cpp/utility/format/formatter#Standard_format_specification) and do it properly

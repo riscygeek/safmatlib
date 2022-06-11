@@ -19,6 +19,13 @@ struct safmat::Formatter<RandomStruct> {
     }
 };
 
+template<>
+struct safmat::io::OutputAdapter<std::vector<char>> {
+    inline static void write(std::vector<char> *vec, std::string_view s) {
+        vec->insert(end(*vec), begin(s), end(s));
+    }
+};
+
 int main() {
     using namespace std::literals;
     using namespace safmat;
@@ -38,4 +45,8 @@ int main() {
 
     RandomStruct r{ 42, "Hello World", { 1, 2, 5, 4, 96, 69, -420, 22 } };
     println(std::cout, "r = {}", r);
+
+    std::vector<char> chars{};
+    print(chars, "Hello World in the vector of chars.");
+    println("{}", chars);
 }
