@@ -97,6 +97,7 @@ For more examples look into [test.cpp](test.cpp).
     - [ ] std::tuple (maybe?)
     - [ ] T\*
 - [x] Implement more [standard format specifiers](https://en.cppreference.com/w/cpp/utility/format/formatter#Standard_format_specification) and do it properly
+- [ ] Implement a way to do nested arguments (eg. `"{:0{}x}"`).
 - [x] Replace OutputIterator with something different.
 - [ ] Somehow make the library char-independent without templating vformat\_to().
 - [ ] vformat()
