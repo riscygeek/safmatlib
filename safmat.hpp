@@ -52,6 +52,7 @@
 namespace safmat {
     template<class T>
     struct Formatter;
+    struct FormatContext;
 
     class format_error : std::exception {
     private:
@@ -113,9 +114,9 @@ namespace safmat {
     concept Formattable = requires (const std::remove_cvref_t<T> &x,
                                     Formatter<std::remove_cvref_t<T>> &fmt,
                                     InputIterator &in,
-                                    Output out) {
+                                    FormatContext &ctx) {
         fmt.parse(in);
-        fmt.format_to(out, x);
+        fmt.format_to(ctx, x);
     };
 
     class FormatArg {
@@ -123,8 +124,9 @@ namespace safmat {
         struct FormatArgBase {
             virtual ~FormatArgBase() = default;
             virtual void parse(InputIterator &) = 0;
-            virtual void format_to(Output) = 0;
+            virtual void format_to(FormatContext &) = 0;
             virtual void reset_fmt() = 0;
+            virtual std::optional<std::size_t> to_size_t() const noexcept = 0;
         };
         template<Formattable T>
         struct FormatArgImpl : FormatArgBase {
@@ -134,8 +136,15 @@ namespace safmat {
             FormatArgImpl(T value) : value(std::move(value)) {}
 
             void parse(InputIterator &in) override { fmt.parse(in); }
-            void format_to(Output out) override { fmt.format_to(out, value); }
+            void format_to(FormatContext &ctx) override { fmt.format_to(ctx, value); }
             void reset_fmt() override { fmt = Formatter<T>{}; }
+            std::optional<std::size_t> to_size_t() const noexcept override {
+                if constexpr (requires { std::size_t{value}; }) {
+                    return std::size_t{value};
+                } else {
+                    return {};
+                }
+            }
         };
 
         std::unique_ptr<FormatArgBase> ptr;
@@ -152,12 +161,26 @@ namespace safmat {
         }
 
         void parse(InputIterator &in) const { ptr->parse(in); }
-        void format_to(Output out) const { ptr->format_to(out); }
+        void format_to(FormatContext &ctx) const { ptr->format_to(ctx); }
         void reset_fmt() const { ptr->reset_fmt(); }
+        std::optional<std::size_t> to_size_t() const noexcept { return ptr->to_size_t(); }
      };
 
-     inline void vformat_to(Output out, std::string_view fmt, std::span<FormatArg> args) {
+    struct FormatContext {
+        Output out;
+        std::span<FormatArg> args{};
         std::size_t carg{0};
+
+        const FormatArg &operator[](std::size_t idx) const {
+            return idx < args.size() ? args[idx] : throw format_error{"Not enough format arguments."};
+        }
+        const FormatArg &next() {
+            return (*this)[carg++];
+        }
+     };
+
+     inline void vformat_to(FormatContext &ctx, std::string_view fmt) {
+        auto &out = ctx.out;
         auto it = begin(fmt);
 
         while (it != end(fmt)) {
@@ -176,13 +199,10 @@ namespace safmat {
                     while (std::isdigit(*it))
                         idx = idx * 10 + (*it++ - '0');
                 } else {
-                    idx = carg++;
+                    idx = ctx.carg++;
                 }
 
-                if (idx >= args.size())
-                    throw format_error("Format index too large.");
-
-                auto &arg = args[idx];
+                auto &arg = ctx[idx];
 
                 arg.reset_fmt();
 
@@ -196,7 +216,7 @@ namespace safmat {
 
                 ++it;
 
-                arg.format_to(out);
+                arg.format_to(ctx);
             } else if (*it == '}') {
                 ++it;
                 if (*it == '}') {
@@ -212,9 +232,10 @@ namespace safmat {
     }
 
     template<class... Args>
-    void format_to(Output &out, std::string_view fmt, Args&&... args) {
+    void format_to(Output out, std::string_view fmt, Args&&... args) {
         std::array<FormatArg, sizeof...(args)> argv{ FormatArg{ std::forward<Args>(args) }... };
-        vformat_to(out, fmt, argv);
+        auto ctx = FormatContext{ out, argv, 0 };
+        vformat_to(ctx, fmt);
     }
 
     template<class... Args>
@@ -400,8 +421,10 @@ namespace safmat::internal {
             PaddedFormatter::parse_width(in);
         }
 
-        void format(Output out, std::string_view number, bool negative) {
+        void format(FormatContext &ctx, std::string_view number, bool negative) {
             const std::string_view sign_str = negative ? "-" : (sign != '-' ? std::string_view{&sign, &sign + 1} : "");
+            auto &out = ctx.out;
+
             if (pad_zero) {
                 out.write(sign_str);
 
@@ -456,7 +479,7 @@ namespace safmat::internal {
                 throw format_error("Expected '}'.");
             }
         }
-        void format(Output out, std::function<std::string(int)> f, bool negative) {
+        void format(FormatContext &ctx, std::function<std::string(int)> f, bool negative) {
             std::string number{};
 
             switch (rep) {
@@ -487,7 +510,7 @@ namespace safmat::internal {
                 throw format_error{"Unimplemented operation."};
             }
 
-            NumericFormatter::format(out, number, negative);
+            NumericFormatter::format(ctx, number, negative);
         }
     };
 
@@ -519,7 +542,7 @@ namespace safmat::internal {
             }
         }
 
-        void format(Output out, std::function<std::string(std::optional<std::chars_format>)> f, bool negative) {
+        void format(FormatContext &ctx, std::function<std::string(std::optional<std::chars_format>)> f, bool negative) {
             std::optional<std::chars_format> fmt{};
 
             switch (rep) {
@@ -553,10 +576,9 @@ namespace safmat::internal {
 
             auto number = f(fmt);
             if (std::isupper(rep)) {
-                //std::transform(begin(number), end(number), begin(number), [](char ch){ return std::toupper(static_cast<unsigned char>(ch)); });
                 std::for_each(begin(number), end(number), [](char &ch){ ch = std::toupper(static_cast<unsigned char>(ch)); });
             }
-            NumericFormatter::format(out, number, negative);
+            NumericFormatter::format(ctx, number, negative);
         }
     };
 
@@ -569,8 +591,10 @@ namespace safmat::internal {
                 ++in;
         }
 
-        void format_to(Output out, std::string_view s) {
+        void format_to(FormatContext &ctx, std::string_view s) {
             const auto len = prec.has_value() ? std::min(prec.value(), s.length()) : s.length();
+            auto &out = ctx.out;
+
             PaddedFormatter::pre_format(out, len);
             out.write(s.substr(0, len));
             PaddedFormatter::post_format(out, len);
@@ -588,7 +612,7 @@ namespace safmat {
             IntegralFormatter::parse(in, std::is_same_v<T, bool>);
        }
 
-        void format_to(Output out, T x) {
+        void format_to(FormatContext &ctx, T x) {
             bool is_negative;
 
             if constexpr (std::is_signed_v<T>) {
@@ -616,7 +640,7 @@ namespace safmat {
                 }
             };
 
-            IntegralFormatter::format(out, f, is_negative);
+            IntegralFormatter::format(ctx, f, is_negative);
         }
     };
 
@@ -632,7 +656,7 @@ namespace safmat {
 
     template<std::floating_point T>
     struct Formatter<T> : internal::FloatingPointFormatter {
-        void format_to(Output out, T x) {
+        void format_to(FormatContext &ctx, T x) {
             const auto f = [this, x](std::optional<std::chars_format> fmt) -> std::string {
                 const auto v = std::abs(x);
 
@@ -658,7 +682,7 @@ namespace safmat {
                     throw format_error{"Number too long."};
                 }
             };
-            format(out, f, x < T{});
+            format(ctx, f, x < T{});
         }
     };
 
@@ -669,10 +693,10 @@ namespace safmat {
     struct Formatter<std::pair<A, B>> : internal::PaddedFormatter {
         using T = std::pair<A, B>;
 
-        void format_to(Output out, const T &p) {
+        void format_to(FormatContext &ctx, const T &p) {
             const auto &[a, b] = p;
 
-            safmat::format_to(out, "({}, {})", a, b);
+            safmat::format_to(ctx.out, "({}, {})", a, b);
         }
     };
 
@@ -681,15 +705,17 @@ namespace safmat {
         using T = concepts::elem_type_t<C>;
         using F = Formatter<T>;
 
-        void format_to(Output out, const C &c) {
-            out.write('[');
+        void format_to(FormatContext &ctx, const C &c) {
+            auto &out = ctx.out;
             auto it = begin(c);
             const auto e = end(c);
+
+            out.write('[');
             if (it != e) {
-                F::format_to(out, *it++);
+                F::format_to(ctx, *it++);
                 while (it != e) {
                     out.write(", ");
-                    F::format_to(out, *it++);
+                    F::format_to(ctx, *it++);
                 }
             }
             out.write(']');

@@ -49,7 +49,9 @@ struct safmat::Formatter<Person> {
         }
     }
     
-    void format_to(safmat::Output out, const Person &p) {
+    void format_to(safmat::FormatContext &ctx, const Person &p) {
+        auto &out = ctx.out;
+        
         switch (rep) {
         case 's':
             safmat::format_to(out, "{}", p.name);

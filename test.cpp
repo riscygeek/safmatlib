@@ -14,8 +14,8 @@ struct RandomStruct {
 template<>
 struct safmat::Formatter<RandomStruct> {
     void parse(safmat::InputIterator &) {}
-    void format_to(safmat::Output out, const RandomStruct &r) {
-        safmat::format_to(out, "{{ x={}, s='{}', ints={:-#x} }}", r.x, r.s, r.ints);
+    void format_to(safmat::FormatContext &ctx, const RandomStruct &r) {
+        safmat::format_to(ctx.out, "{{ x={}, s='{}', ints={:-#x} }}", r.x, r.s, r.ints);
     }
 };
 
