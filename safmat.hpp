@@ -469,6 +469,8 @@ namespace safmat::internal {
             case 'X':
                 rep = *in++;
                 break;
+            case '}':
+                break;
             case 's':
                 if (is_bool) {
                     rep = *in++;
@@ -536,6 +538,8 @@ namespace safmat::internal {
             case 'g':
             case 'G':
                 rep = *in++;
+                break;
+            case '}':
                 break;
             default:
                 throw format_error("Expected '}'.");
