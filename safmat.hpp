@@ -184,7 +184,7 @@ namespace safmat {
         }
      };
 
-     inline void vformat_to(FormatContext &ctx, std::string_view fmt) {
+     inline void xformat_to(FormatContext &ctx, std::string_view fmt) {
         auto &out = ctx.out;
         auto it = begin(fmt);
 
@@ -240,7 +240,7 @@ namespace safmat {
     void format_to(Output out, std::string_view fmt, Args&&... args) {
         std::array<FormatArg, sizeof...(args)> argv{ FormatArg{ std::forward<Args>(args) }... };
         auto ctx = FormatContext{ out, argv, 0 };
-        vformat_to(ctx, fmt);
+        xformat_to(ctx, fmt);
     }
 
     template<class... Args>
