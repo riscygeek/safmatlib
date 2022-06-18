@@ -5,6 +5,7 @@
 #include <set>
 #include "safmat.hpp"
 
+
 struct RandomStruct {
     int x;
     const char *s;
@@ -30,23 +31,30 @@ int main() {
     using namespace std::literals;
     using namespace safmat;
 
-    println("'{:X^#8x}'", -42);
-    println("Hello {} {2} {1}!", "World", "String"s, "StringView"sv);
-    println("pi = {}", std::numbers::pi);
+    try {
+        println("'{:x^100}'", "Hello");
+        println("Hello {:0{}}", 42, 100);
 
-    auto vec = std::vector{10, 20, 30};
-    println("vec = {}", vec);
+        println("'{:X^#8x}'", -42);
+        println("Hello {} {2} {1}!", "World", "String"s, "StringView"sv);
+        println("pi = {}", std::numbers::pi);
 
-    println("{} {0:d} {}", true, 'X');
+        auto vec = std::vector{10, 20, 30};
+        println("vec = {}", vec);
 
-    println("'{:^11.5}'", "Hello World");
+        println("{} {0:d} {}", true, 'X');
 
-    println("{}", std::pair{42, "Hello"});
+        println("'{:^11.5}'", "Hello World");
 
-    RandomStruct r{ 42, "Hello World", { 1, 2, 5, 4, 96, 69, -420, 22 } };
-    println(std::cout, "r = {}", r);
+        println("{:-^40}", std::pair{42, "Hello"});
 
-    std::vector<char> chars{};
-    print(chars, "Hello World in the vector of chars.");
-    println("{}", chars);
+        RandomStruct r{ 42, "Hello World", { 1, 2, 5, 4, 96, 69, -420, 22 } };
+        println(std::cout, "r = {}", r);
+
+        std::vector<char> chars{};
+        print(chars, "Hello World in the vector of chars.");
+        println("{}", chars);
+    } catch (const format_error &e) {
+        println("ERROR: {}", e.what());
+    }
 }

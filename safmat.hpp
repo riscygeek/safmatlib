@@ -23,6 +23,7 @@
 #include <optional>
 #include <concepts>
 #include <charconv>
+#include <variant>
 #include <utility>
 #include <cstring>
 #include <string>
@@ -139,8 +140,8 @@ namespace safmat {
             void format_to(FormatContext &ctx) override { fmt.format_to(ctx, value); }
             void reset_fmt() override { fmt = Formatter<T>{}; }
             std::optional<std::size_t> to_size_t() const noexcept override {
-                if constexpr (requires { std::size_t{value}; }) {
-                    return std::size_t{value};
+                if constexpr (std::integral<T>) {
+                    return std::size_t(value);
                 } else {
                     return {};
                 }
@@ -164,6 +165,10 @@ namespace safmat {
         void format_to(FormatContext &ctx) const { ptr->format_to(ctx); }
         void reset_fmt() const { ptr->reset_fmt(); }
         std::optional<std::size_t> to_size_t() const noexcept { return ptr->to_size_t(); }
+        std::size_t expect_size_t() const {
+            const auto opt = to_size_t();
+            return opt.has_value() ? opt.value() : throw format_error{"Expected size as the nested argument."};
+        }
      };
 
     struct FormatContext {
@@ -315,24 +320,60 @@ namespace safmat::concepts {
 
 // Formatter<> helpers.
 namespace safmat::internal {
-    inline void parse_prec(InputIterator &in, std::size_t &prec) {
-        if (*in == '.') {
-            ++in;
-            if (!std::isdigit(*in))
-                throw format_error{"Expected number after '.'."};
+    class NestedSizeArgFormatter {
+    private:
+        // std::monostate   => unspecified,
+        // std::size_t      => direct,
+        // std::optional    => indirect,
+        std::variant<std::monostate, std::size_t, std::optional<std::size_t>> arg_rep;
+    public:
+        std::optional<std::size_t> arg;
+        bool parse(InputIterator &in) {
+            const auto parse_number = [&in] {
+                std::size_t n{};
+                while (std::isdigit(*in))
+                    n = n * 10 + (*in++ - '0');
+                return n;
+            };
 
-            prec = 0;
-            while (std::isdigit(*in))
-                prec = prec * 10 + (*in++ - '0');
+            if (std::isdigit(*in)) {
+                arg_rep = parse_number();
+                return true;
+            } else if (*in == '{') {
+                std::optional<std::size_t> idx{};
+                ++in;
+
+                if (std::isdigit(*in))
+                    idx = parse_number();
+
+                if (*in != '}')
+                    throw format_error{"Expected '}' for nested argument."};
+
+                ++in;
+                arg_rep = idx;
+                return true;
+            } else {
+                return false;
+            }
         }
-    }
+        void read(FormatContext &ctx) {
+            if (arg.has_value())
+                return;
 
-    struct PaddedFormatter {
+            if (auto n = std::get_if<std::size_t>(&arg_rep)) {
+                arg = *n;
+            } else if (auto idx = std::get_if<std::optional<std::size_t>>(&arg_rep)) {
+                arg = (idx->has_value() ? ctx[idx->value()] : ctx.next()).expect_size_t();
+            }
+        }
+
+    };
+
+    struct PaddedFormatter : private NestedSizeArgFormatter {
         char fill;
-        char padding{'\0'};
-        std::size_t width{0};
+        char padding;
 
-        PaddedFormatter(char fill = '<') : fill{fill} {}
+        PaddedFormatter(char fill = '<', char padding = ' ') : fill{fill}, padding{padding} {}
 
         void parse_fill(InputIterator &in) {
             auto is_fill = [](char ch) {
@@ -347,11 +388,7 @@ namespace safmat::internal {
             }
         }
         void parse_width(InputIterator &in) {
-            // Parse width.
-            width = 0;
-            while (std::isdigit(*in)) {
-                width = width * 10 + (*in++ - '0');
-            }
+            NestedSizeArgFormatter::parse(in);
         }
         void parse(InputIterator &in) {
             parse_fill(in);
@@ -363,30 +400,31 @@ namespace safmat::internal {
             out.write(pad);
         }
 
+        void read_width(FormatContext &ctx) { NestedSizeArgFormatter::read(ctx); }
+        std::size_t width() const { return NestedSizeArgFormatter::arg.value_or(0); }
+
         void pre_format(Output out, std::size_t len) {
-            if (len < width && (fill == '>' || fill == '^')) {
-                print_padding(out, width - len, 0);
+            if (len < width() && (fill == '>' || fill == '^')) {
+                print_padding(out, width() - len, 0);
             }
         }
         void post_format(Output out, std::size_t len) {
-            if (len < width && (fill == '<' || fill == '^')) {
-                print_padding(out, width - len, 1);
+            if (len < width() && (fill == '<' || fill == '^')) {
+                print_padding(out, width() - len, 1);
             }
         }
     };
 
-    struct PrecisionFormatter {
-        std::optional<std::size_t> prec{};
+    struct PrecisionFormatter : private NestedSizeArgFormatter {
+        void read_prec(FormatContext &ctx) { NestedSizeArgFormatter::read(ctx); }
+        auto prec() const { return NestedSizeArgFormatter::arg; }
+        void set_prec(std::size_t n) { arg = n; }
 
         void parse_prec(InputIterator &in) {
             if (*in == '.') {
                 ++in;
-                if (!std::isdigit(*in))
+                if (!NestedSizeArgFormatter::parse(in))
                     throw format_error{"Expected precision."};
-                std::size_t n = 0;
-                while (std::isdigit(*in))
-                    n = n * 10 + (*in++ - '0');
-                prec = n;
             }
         }
     };
@@ -396,7 +434,7 @@ namespace safmat::internal {
         char alternate{false};
         char pad_zero{false};
 
-        NumericFormatter() : PaddedFormatter{'>'} {}
+        NumericFormatter() : PaddedFormatter{'>', '\0'} {}
 
         void parse(InputIterator &in) {
             PaddedFormatter::parse_fill(in);
@@ -425,11 +463,13 @@ namespace safmat::internal {
             const std::string_view sign_str = negative ? "-" : (sign != '-' ? std::string_view{&sign, &sign + 1} : "");
             auto &out = ctx.out;
 
+            PaddedFormatter::read_width(ctx);
+
             if (pad_zero) {
                 out.write(sign_str);
 
-                if (const auto len = number.size(); len < width) {
-                    const std::string pad(width - len, '0');
+                if (const auto len = number.size(); len < width()) {
+                    const std::string pad(width() - len, '0');
                     out.write(pad);
                 }
 
@@ -483,6 +523,8 @@ namespace safmat::internal {
         }
         void format(FormatContext &ctx, std::function<std::string(int)> f, bool negative) {
             std::string number{};
+
+            PaddedFormatter::read_width(ctx);
 
             switch (rep) {
             case 'b':
@@ -549,6 +591,9 @@ namespace safmat::internal {
         void format(FormatContext &ctx, std::function<std::string(std::optional<std::chars_format>)> f, bool negative) {
             std::optional<std::chars_format> fmt{};
 
+            PaddedFormatter::read_width(ctx);
+            PrecisionFormatter::read_prec(ctx);
+
             switch (rep) {
             case 'a':
             case 'A':
@@ -567,15 +612,15 @@ namespace safmat::internal {
                 fmt = std::chars_format::general;
                 break;
             case '\0':
-                if (prec.has_value())
+                if (prec().has_value())
                     fmt = std::chars_format::general;
                 break;
             default:
                 throw format_error{"Unimplemented operation."};
             }
 
-            if (rep != '\0' && !prec.has_value()) {
-                prec = 6;
+            if (rep != '\0' && !prec().has_value()) {
+                set_prec(6);
             }
 
             auto number = f(fmt);
@@ -596,7 +641,10 @@ namespace safmat::internal {
         }
 
         void format_to(FormatContext &ctx, std::string_view s) {
-            const auto len = prec.has_value() ? std::min(prec.value(), s.length()) : s.length();
+            PaddedFormatter::read_width(ctx);
+            PrecisionFormatter::read_prec(ctx);
+
+            const auto len = prec().has_value() ? std::min(prec().value(), s.length()) : s.length();
             auto &out = ctx.out;
 
             PaddedFormatter::pre_format(out, len);
@@ -664,8 +712,8 @@ namespace safmat {
             const auto f = [this, x](std::optional<std::chars_format> fmt) -> std::string {
                 const auto v = std::abs(x);
 
-                const auto ilen = std::max(width, (v != T{}) ?  static_cast<std::size_t>(std::ceil(std::log10(v))) : 1);
-                const auto flen = prec.value_or(std::numeric_limits<T>::digits10 * 2);
+                const auto ilen = std::max(width(), (v != T{}) ?  static_cast<std::size_t>(std::ceil(std::log10(v))) : 1);
+                const auto flen = prec().value_or(std::numeric_limits<T>::digits10 * 2);
                 const auto len = ilen + flen + 3;
 
                 std::unique_ptr<char []> buffer(new char[len]);
@@ -673,8 +721,8 @@ namespace safmat {
                 std::to_chars_result r;
                 if (!fmt.has_value()) {
                     r = std::to_chars(buffer.get(), buffer.get() + len, v);
-                } else if (prec.has_value()) {
-                    r = std::to_chars(buffer.get(), buffer.get() + len, v, fmt.value(), prec.value());
+                } else if (prec().has_value()) {
+                    r = std::to_chars(buffer.get(), buffer.get() + len, v, fmt.value(), prec().value());
                 } else {
                     r = std::to_chars(buffer.get(), buffer.get() + len, v, fmt.value());
                 }
@@ -699,8 +747,13 @@ namespace safmat {
 
         void format_to(FormatContext &ctx, const T &p) {
             const auto &[a, b] = p;
+            internal::PaddedFormatter::read_width(ctx);
 
-            safmat::format_to(ctx.out, "({}, {})", a, b);
+            const auto f = format("({}, {})", a, b);
+
+            internal::PaddedFormatter::pre_format(ctx.out, f.length());
+            ctx.out.write(f);
+            internal::PaddedFormatter::post_format(ctx.out, f.length());
         }
     };
 
