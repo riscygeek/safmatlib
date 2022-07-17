@@ -26,6 +26,7 @@
 #include <variant>
 #include <utility>
 #include <cstring>
+#include <version>
 #include <string>
 #include <memory>
 #include <limits>
@@ -33,6 +34,10 @@
 #include <cmath>
 #include <array>
 #include <span>
+
+#if __cpp_lib_source_location >= 201907L
+# include <source_location>
+#endif
 
 // Enable support for std::ostream Output (default=disabled).
 #ifndef  SAFMAT_OUT_OSTREAM
@@ -84,7 +89,7 @@ namespace safmat::io {
         struct OutputImpl : OutputBase {
             T *out;
 
-            OutputImpl(T *out) : out(out) {}
+            OutputImpl(T *out) noexcept : out(out) {}
 
             void write(std::string_view s) const override {
                 OutputAdapter<T>::write(out, s);
@@ -778,6 +783,16 @@ namespace safmat {
             out.write(']');
         }
     };
+
+#if __cpp_lib_source_location >= 201907L
+    template<>
+    struct Formatter<std::source_location> : internal::PaddedFormatter {
+	void format_to(FormatContext &ctx, const std::source_location &loc) {
+	    auto &out = ctx.out;
+	    safmat::format_to(out, "{}:{}:{}", loc.file_name(), loc.line(), loc.column());
+	}
+    };
+#endif
 }
 
 #endif // FILE_SAFMAT_HPP

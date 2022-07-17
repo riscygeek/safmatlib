@@ -31,6 +31,9 @@ int main() {
     using namespace std::literals;
     using namespace safmat;
 
+    auto loc = std::source_location::current();
+    println("loc = {}", loc);
+
     try {
         println("'{:x^100}'", "Hello");
         println("Hello {:0{}}", 42, 100);
